@@ -2,8 +2,6 @@ import os
 import json
 import requests
 from bs4 import BeautifulSoup
-from aiogram import Bot
-from aiogram.enums import ParseMode
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,7 +10,7 @@ TG_TOKEN = os.getenv("TG_TOKEN")
 SUB_FILE = "subscribers.json"
 STATE_FILE = "last_sent.json"
 
-bot = Bot(token=TG_TOKEN, parse_mode=ParseMode.HTML)
+TG_API = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
 
 
 def load_json(path):
@@ -30,7 +28,11 @@ def save_json(path, data):
 
 def fetch_boosty(channel):
     url = f"https://boosty.to/{channel}"
-    r = requests.get(url, timeout=10)
+    try:
+        r = requests.get(url, timeout=10)
+    except Exception:
+        return None
+
     if r.status_code != 200:
         return None
 
@@ -45,7 +47,21 @@ def fetch_boosty(channel):
     return {"title": title, "link": link}
 
 
-async def main():
+def send_message(user_id, text):
+    payload = {
+        "chat_id": user_id,
+        "text": text,
+        "parse_mode": "HTML"
+    }
+    try:
+        r = requests.post(TG_API, json=payload, timeout=10)
+        if r.status_code != 200:
+                    print("Ошибка отправки в Telegram:", r.text)
+    except Exception as e:
+        print("Исключение при отправке в Telegram:", e)
+
+
+def main():
     subs = load_json(SUB_FILE)
     state = load_json(STATE_FILE)
 
@@ -57,15 +73,18 @@ async def main():
 
             last = state.get(user_id, {}).get(channel)
 
+            # Если пост уже отправляли — пропускаем
             if last == data["link"]:
                 continue
 
-            await bot.send_message(
-                chat_id=user_id,
-                text=f"Новый пост на <b>{channel}</b>:\n\n"
-                     f"<b>{data['title']}</b>\n{data['link']}"
+            # Отправляем уведомление
+            send_message(
+                user_id,
+                f"Новый пост на <b>{channel}</b>:\n\n"
+                f"<b>{data['title']}</b>\n{data['link']}"
             )
 
+            # Обновляем состояние
             state.setdefault(user_id, {})
             state[user_id][channel] = data["link"]
 
@@ -73,5 +92,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    main()

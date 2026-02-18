@@ -283,6 +283,7 @@ telegram_app = None
 async def lifespan(app: FastAPI):
     global telegram_app
 
+    # 1. Создаём Telegram Application
     telegram_app = (
         ApplicationBuilder()
         .token(TG_TOKEN)
@@ -296,11 +297,12 @@ async def lifespan(app: FastAPI):
     telegram_app.add_handler(CommandHandler("list", list_subs))
     telegram_app.add_handler(CommandHandler("help", help_cmd))
 
-    # --- Автоматический выбор webhook URL ---
-    webhook_url = WEBHOOK_URL
+    # 2. ИНИЦИАЛИЗАЦИЯ (обязательно!)
+    await telegram_app.initialize()
 
+    # 3. Определяем webhook URL
+    webhook_url = WEBHOOK_URL
     if not webhook_url:
-        # локальный режим → пробуем взять URL из ngrok
         ngrok_url = get_ngrok_url()
         if ngrok_url:
             webhook_url = f"{ngrok_url}/webhook/{TG_TOKEN}"
@@ -309,16 +311,20 @@ async def lifespan(app: FastAPI):
             print("⚠️ WEBHOOK_URL не задан и ngrok не найден. Webhook не установлен.")
             webhook_url = None
 
-    # --- Устанавливаем webhook ---
+    # 4. Устанавливаем webhook
     if webhook_url:
         set_url = f"https://api.telegram.org/bot{TG_TOKEN}/setWebhook"
         r = requests.get(set_url, params={"url": webhook_url})
         print("Webhook set:", r.text)
 
-    # --- Запускаем планировщик ---
+    # 5. Запускаем scheduler
     asyncio.create_task(scheduler_loop(telegram_app))
 
+    # 6. Передаём управление FastAPI
     yield
+
+    # 7. Корректное завершение
+    await telegram_app.shutdown()
 
 app = FastAPI(lifespan=lifespan)
 

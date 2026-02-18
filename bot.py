@@ -3,14 +3,18 @@ import json
 import asyncio
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.enums import ParseMode
+from aiogram.utils import executor
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from dotenv import load_dotenv
 
 load_dotenv()
 
 TG_TOKEN = os.getenv("TG_TOKEN")
 SUB_FILE = "subscribers.json"
+
+bot = Bot(token=TG_TOKEN, parse_mode="HTML")
+dp = Dispatcher(bot)
+dp.middleware.setup(LoggingMiddleware())
 
 
 # -----------------------------
@@ -30,16 +34,9 @@ def save_subs(data):
 
 
 # -----------------------------
-# Bot init
-# -----------------------------
-bot = Bot(token=TG_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher()
-
-
-# -----------------------------
 # Commands
 # -----------------------------
-@dp.message(Command("start"))
+@dp.message_handler(commands=["start", "help"])
 async def start(message: types.Message):
     user_id = str(message.from_user.id)
     subs = load_subs()
@@ -60,18 +57,13 @@ async def start(message: types.Message):
     await message.answer(text)
 
 
-@dp.message(Command("help"))
-async def help_cmd(message: types.Message):
-    await start(message)
-
-
-@dp.message(Command("subscribe"))
+@dp.message_handler(commands=["subscribe"])
 async def subscribe(message: types.Message):
-    args = message.text.split()
-    if len(args) < 2:
+    args = message.get_args().split()
+    if not args:
         return await message.answer("Используй: /subscribe historipi")
 
-    channel = args[1].strip()
+    channel = args[0].strip()
     user_id = str(message.from_user.id)
 
     subs = load_subs()
@@ -86,13 +78,13 @@ async def subscribe(message: types.Message):
     await message.answer(f"Подписал тебя на {channel}\nИнтервал: 6 часов")
 
 
-@dp.message(Command("unsubscribe"))
+@dp.message_handler(commands=["unsubscribe"])
 async def unsubscribe(message: types.Message):
-    args = message.text.split()
-    if len(args) < 2:
+    args = message.get_args().split()
+    if not args:
         return await message.answer("Используй: /unsubscribe historipi")
 
-    channel = args[1].strip()
+    channel = args[0].strip()
     user_id = str(message.from_user.id)
 
     subs = load_subs()
@@ -105,16 +97,16 @@ async def unsubscribe(message: types.Message):
     await message.answer(f"Отписал тебя от {channel}")
 
 
-@dp.message(Command("setinterval"))
+@dp.message_handler(commands=["setinterval"])
 async def setinterval(message: types.Message):
-    args = message.text.split()
-    if len(args) < 3:
+    args = message.get_args().split()
+    if len(args) < 2:
         return await message.answer("Используй: /setinterval historipi 3")
 
-    channel = args[1].strip()
+    channel = args[0].strip()
 
     try:
-        hours = int(args[2])
+        hours = int(args[1])
     except ValueError:
         return await message.answer("Интервал должен быть числом")
 
@@ -133,7 +125,7 @@ async def setinterval(message: types.Message):
     await message.answer(f"Интервал для {channel} обновлён: {hours} ч.")
 
 
-@dp.message(Command("list"))
+@dp.message_handler(commands=["list"])
 async def list_subs(message: types.Message):
     user_id = str(message.from_user.id)
     subs = load_subs().get(user_id, {})
@@ -169,16 +161,9 @@ async def start_web_app():
 # -----------------------------
 # Main
 # -----------------------------
-async def main():
-    if not TG_TOKEN:
-        raise RuntimeError("TG_TOKEN не задан в .env")
-
-    # Запускаем HTTP сервер для Render
+async def on_startup(dp):
     asyncio.create_task(start_web_app())
-
-    # Запускаем Telegram polling
-    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)

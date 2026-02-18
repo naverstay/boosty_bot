@@ -3,7 +3,6 @@ import json
 import requests
 from bs4 import BeautifulSoup
 from aiogram import Bot
-from aiogram.enums import ParseMode
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,7 +11,7 @@ TG_TOKEN = os.getenv("TG_TOKEN")
 SUB_FILE = "subscribers.json"
 STATE_FILE = "last_sent.json"
 
-bot = Bot(token=TG_TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(token=TG_TOKEN, parse_mode="HTML")
 
 
 def load_json(path):

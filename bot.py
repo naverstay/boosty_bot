@@ -1,19 +1,25 @@
 import os
 import json
+import asyncio
+from aiohttp import web
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    ContextTypes,
-)
 
 load_dotenv()
 
 TG_TOKEN = os.getenv("TG_TOKEN")
 SUB_FILE = "subscribers.json"
 
+bot = Bot(token=TG_TOKEN, parse_mode="HTML")
+dp = Dispatcher(bot)
+dp.middleware.setup(LoggingMiddleware())
 
+
+# -----------------------------
+# JSON helpers
+# -----------------------------
 def load_subs():
     try:
         with open(SUB_FILE, "r", encoding="utf-8") as f:
@@ -27,8 +33,12 @@ def save_subs(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
+# -----------------------------
+# Commands
+# -----------------------------
+@dp.message_handler(commands=["start", "help"])
+async def start(message: types.Message):
+    user_id = str(message.from_user.id)
     subs = load_subs()
 
     if user_id not in subs:
@@ -38,123 +48,122 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "Привет! Я бот уведомлений Boosty.\n\n"
         "Команды:\n"
-        "/subscribe <канал> — подписаться\n"
+        "/subscribe <канал> — подписаться (интервал 6 часов)\n"
         "/unsubscribe <канал> — отписаться\n"
         "/setinterval <канал> <часы> — изменить интервал\n"
         "/list — показать твои подписки\n"
         "/help — помощь"
     )
-    await update.effective_message.reply_text(text)
+    await message.answer(text)
 
 
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await start(update, context)
+@dp.message_handler(commands=["subscribe"])
+async def subscribe(message: types.Message):
+    args = message.get_args().split()
+    if not args:
+        return await message.answer("Используй: /subscribe historipi")
 
-
-async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        return await update.effective_message.reply_text("Используй: /subscribe historipi")
-
-    channel = context.args[0].strip()
-    user_id = str(update.effective_user.id)
+    channel = args[0].strip()
+    user_id = str(message.from_user.id)
 
     subs = load_subs()
     subs.setdefault(user_id, {})
 
     if channel in subs[user_id]:
-        return await update.effective_message.reply_text(f"Ты уже подписан на {channel}")
+        return await message.answer(f"Ты уже подписан на {channel}")
 
     subs[user_id][channel] = {"interval": 6}
     save_subs(subs)
-    await update.effective_message.reply_text(f"Подписал тебя на {channel}\nИнтервал обновления: 6 часов")
+
+    await message.answer(f"Подписал тебя на {channel}\nИнтервал: 6 часов")
 
 
-async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        return await update.effective_message.reply_text("Используй: /unsubscribe historipi")
+@dp.message_handler(commands=["unsubscribe"])
+async def unsubscribe(message: types.Message):
+    args = message.get_args().split()
+    if not args:
+        return await message.answer("Используй: /unsubscribe historipi")
 
-    channel = context.args[0].strip()
-    user_id = str(update.effective_user.id)
+    channel = args[0].strip()
+    user_id = str(message.from_user.id)
 
     subs = load_subs()
     if user_id not in subs or channel not in subs[user_id]:
-        return await update.effective_message.reply_text(f"Ты не подписан на {channel}")
+        return await message.answer(f"Ты не подписан на {channel}")
 
     del subs[user_id][channel]
     save_subs(subs)
-    await update.effective_message.reply_text(f"Отписал тебя от {channel}")
+
+    await message.answer(f"Отписал тебя от {channel}")
 
 
-async def setinterval(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) < 2:
-        return await update.effective_message.reply_text("Используй: /setinterval historipi 3")
+@dp.message_handler(commands=["setinterval"])
+async def setinterval(message: types.Message):
+    args = message.get_args().split()
+    if len(args) < 2:
+        return await message.answer("Используй: /setinterval historipi 3")
 
-    channel = context.args[0].strip()
+    channel = args[0].strip()
+
     try:
-        hours = int(context.args[1])
+        hours = int(args[1])
     except ValueError:
-        return await update.effective_message.reply_text("Интервал должен быть числом")
+        return await message.answer("Интервал должен быть числом")
 
     if hours < 1:
-        return await update.effective_message.reply_text("Интервал должен быть минимум 1 час")
+        return await message.answer("Интервал должен быть минимум 1 час")
 
-    user_id = str(update.effective_user.id)
+    user_id = str(message.from_user.id)
     subs = load_subs()
 
     if user_id not in subs or channel not in subs[user_id]:
-        return await update.effective_message.reply_text("Ты не подписан на этот канал")
+        return await message.answer("Ты не подписан на этот канал")
 
     subs[user_id][channel]["interval"] = hours
     save_subs(subs)
 
-    await update.effective_message.reply_text(f"Интервал для {channel} обновлён: {hours} ч.")
+    await message.answer(f"Интервал для {channel} обновлён: {hours} ч.")
 
 
-async def setup_commands(app):
-    await app.bot.set_my_commands([
-        ("start", "Начать работу с ботом"),
-        ("subscribe", "Подписаться на канал Boosty"),
-        ("unsubscribe", "Отписаться от канала"),
-        ("setinterval", "Установить интервал обновления"),
-        ("list", "Показать список подписок"),
-        ("help", "Помощь"),
-    ])
+@dp.message_handler(commands=["list"])
+async def list_subs(message: types.Message):
+    user_id = str(message.from_user.id)
+    subs = load_subs().get(user_id, {})
 
-
-async def list_subs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    subs = load_subs()
-    user_channels = subs.get(user_id, {})
-
-    if not user_channels:
-        return await update.effective_message.reply_text("Ты ни на что не подписан")
+    if not subs:
+        return await message.answer("Ты ни на что не подписан")
 
     text = "Твои подписки:\n"
-    for ch, cfg in user_channels.items():
+    for ch, cfg in subs.items():
         text += f"- {ch} (интервал: {cfg['interval']} ч.)\n"
 
-    await update.effective_message.reply_text(text)
+    await message.answer(text)
 
 
-def main():
-    if not TG_TOKEN:
-        raise RuntimeError("TG_TOKEN не задан в .env")
+# -----------------------------
+# HTTP server for Render
+# -----------------------------
+async def handle(request):
+    return web.Response(text="Boosty bot is running!")
 
-    app = (
-        ApplicationBuilder()
-        .token(TG_TOKEN)
-        .post_init(setup_commands)   # ← ВАЖНО!
-        .build()
-    )
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("subscribe", subscribe))
-    app.add_handler(CommandHandler("unsubscribe", unsubscribe))
-    app.add_handler(CommandHandler("setinterval", setinterval))
-    app.add_handler(CommandHandler("list", list_subs))
+async def start_web_app():
+    app = web.Application()
+    app.router.add_get("/", handle)
 
-    app.run_polling()
+    port = int(os.getenv("PORT", 10000))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+
+# -----------------------------
+# Main
+# -----------------------------
+async def on_startup(dp):
+    asyncio.create_task(start_web_app())
+
 
 if __name__ == "__main__":
-    main()
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)

@@ -1,5 +1,6 @@
+aiogram==3.4.1
+aiohttp==3.9.5
+python-dotenv
 requests
 beautifulsoup4
 tzdata
-python-dotenv
-python-telegram-bot==20.7

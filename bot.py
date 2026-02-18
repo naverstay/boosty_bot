@@ -1,13 +1,12 @@
 import os
 import json
 import asyncio
-import threading
-import uvicorn
 import requests
 import zoneinfo
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
@@ -19,6 +18,8 @@ from telegram.ext import (
 load_dotenv()
 
 TG_TOKEN = os.getenv("TG_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+
 SUB_FILE = "subscribers.json"
 STATE_FILE = "last_sent.json"
 URL = "https://boosty.to/"
@@ -35,6 +36,16 @@ def load_json(path):
 def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+def get_ngrok_url():
+    try:
+        r = requests.get("http://127.0.0.1:4040/api/tunnels")
+        tunnels = r.json()["tunnels"]
+        for t in tunnels:
+            if t["proto"] == "https":
+                return t["public_url"]
+    except Exception:
+        return None
 
 def plural(n, str1, str2, str5):
     return f"{n} " + (
@@ -56,7 +67,7 @@ def get_last_post_info(channel: str):
     r = requests.get(url, timeout=10)
     r.raise_for_status()
 
-    save_page(channel, r.text)
+#     save_page(channel, r.text)
 
     soup = BeautifulSoup(r.text, "html.parser")
 
@@ -101,28 +112,6 @@ def get_last_post_info(channel: str):
 
     return {"title": title, "link": link, "iso_date": iso_date}
 
-
-def fetch_boosty(channel):
-    url = f"{URL}{channel}"
-    try:
-        r = requests.get(url, timeout=10)
-        print("Checking", channel, "data:", data)
-    except Exception:
-        return None
-
-    if r.status_code != 200:
-        return None
-
-    soup = BeautifulSoup(r.text, "html.parser")
-    post = soup.find("a", {"class": "post-card"})
-    if not post:
-        return None
-
-    title = post.get("title") or "Новый пост"
-    link = URL + post.get("href")
-
-    return {"title": title, "link": link}
-
 # ---------------- TELEGRAM SEND ----------------
 
 def send_message(user_id, text):
@@ -143,11 +132,8 @@ async def scheduler_loop(app):
     print("Scheduler started")
 
     while True:
-        print("Scheduler tick")
-
         subs = load_json(SUB_FILE)
         state = load_json(STATE_FILE)
-
         now = datetime.utcnow()
 
         for user_id, channels in subs.items():
@@ -211,7 +197,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/list — показать твои подписки\n"
         "/help — помощь"
     )
-
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
@@ -290,49 +275,109 @@ async def list_subs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(text)
 
-# ---------------- FASTAPI SERVER ----------------
+# ---------------- FASTAPI + WEBHOOK ----------------
 
-app = FastAPI()
+telegram_app = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global telegram_app
+
+    telegram_app = (
+        ApplicationBuilder()
+        .token(TG_TOKEN)
+        .build()
+    )
+
+    telegram_app.add_handler(CommandHandler("start", start))
+    telegram_app.add_handler(CommandHandler("subscribe", subscribe))
+    telegram_app.add_handler(CommandHandler("unsubscribe", unsubscribe))
+    telegram_app.add_handler(CommandHandler("setinterval", setinterval))
+    telegram_app.add_handler(CommandHandler("list", list_subs))
+    telegram_app.add_handler(CommandHandler("help", help_cmd))
+
+    # --- Автоматический выбор webhook URL ---
+    webhook_url = WEBHOOK_URL
+
+    if not webhook_url:
+        # локальный режим → пробуем взять URL из ngrok
+        ngrok_url = get_ngrok_url()
+        if ngrok_url:
+            webhook_url = f"{ngrok_url}/webhook/{TG_TOKEN}"
+            print("Использую локальный webhook:", webhook_url)
+        else:
+            print("⚠️ WEBHOOK_URL не задан и ngrok не найден. Webhook не установлен.")
+            webhook_url = None
+
+    # --- Устанавливаем webhook ---
+    if webhook_url:
+        set_url = f"https://api.telegram.org/bot{TG_TOKEN}/setWebhook"
+        r = requests.get(set_url, params={"url": webhook_url})
+        print("Webhook set:", r.text)
+
+    # --- Запускаем планировщик ---
+    asyncio.create_task(scheduler_loop(telegram_app))
+
+    yield
+
+app = FastAPI(lifespan=lifespan)
+
+@app.post("/webhook/{token}")
+async def webhook(token: str, request: Request):
+    if token != TG_TOKEN:
+        return {"status": "forbidden"}
+
+    data = await request.json()
+    update = Update.de_json(data, telegram_app.bot)
+    await telegram_app.process_update(update)
+
+    return {"status": "ok"}
 
 @app.get("/")
 def root():
     return {"status": "ok"}
 
 # ---------------- MAIN ----------------
-def start_bot():
-    # создаём event loop для этого потока
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    tg_app = (
-        ApplicationBuilder()
-        .token(TG_TOKEN)
-        .build()
-    )
-
-    tg_app.add_handler(CommandHandler("start", start))
-    tg_app.add_handler(CommandHandler("subscribe", subscribe))
-    tg_app.add_handler(CommandHandler("unsubscribe", unsubscribe))
-    tg_app.add_handler(CommandHandler("setinterval", setinterval))
-    tg_app.add_handler(CommandHandler("list", list_subs))
-    tg_app.add_handler(CommandHandler("help", help_cmd))
-
-    loop.run_until_complete(tg_app.run_polling())
-
-
-def start_scheduler():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(scheduler_loop(None))
-
 
 if __name__ == "__main__":
-    # 1) Запускаем Telegram‑бота в отдельном потоке
-    threading.Thread(target=start_bot, daemon=True).start()
-
-    # 2) Запускаем планировщик в отдельном потоке
-    threading.Thread(target=start_scheduler, daemon=True).start()
-
-    # 3) Запускаем FastAPI сервер (главный поток)
     port = int(os.getenv("PORT", 10000))
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=port)
+
+# def start_bot():
+#     # создаём event loop для этого потока
+#     loop = asyncio.new_event_loop()
+#     asyncio.set_event_loop(loop)
+#
+#     tg_app = (
+#         ApplicationBuilder()
+#         .token(TG_TOKEN)
+#         .build()
+#     )
+#
+#     tg_app.add_handler(CommandHandler("start", start))
+#     tg_app.add_handler(CommandHandler("subscribe", subscribe))
+#     tg_app.add_handler(CommandHandler("unsubscribe", unsubscribe))
+#     tg_app.add_handler(CommandHandler("setinterval", setinterval))
+#     tg_app.add_handler(CommandHandler("list", list_subs))
+#     tg_app.add_handler(CommandHandler("help", help_cmd))
+#
+#     loop.run_until_complete(tg_app.run_polling())
+#
+#
+# def start_scheduler():
+#     loop = asyncio.new_event_loop()
+#     asyncio.set_event_loop(loop)
+#     loop.run_until_complete(scheduler_loop(None))
+#
+#
+# if __name__ == "__main__":
+#     # 1) Запускаем Telegram‑бота в отдельном потоке
+#     threading.Thread(target=start_bot, daemon=True).start()
+#
+#     # 2) Запускаем планировщик в отдельном потоке
+#     threading.Thread(target=start_scheduler, daemon=True).start()
+#
+#     # 3) Запускаем FastAPI сервер (главный поток)
+#     port = int(os.getenv("PORT", 10000))
+#     uvicorn.run(app, host="0.0.0.0", port=port)

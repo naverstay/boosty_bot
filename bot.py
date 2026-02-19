@@ -117,76 +117,6 @@ async def run_due_checks(app):
     # Сохраняем обновлённый last_sent
     await redis_save("last_sent", state)
 
-async def check_channel_and_notify(app, user_id, channel, state):
-    data = get_last_post_info(channel)
-    if not data:
-        return
-
-    last_sent = state.get(user_id, {}).get(channel)
-
-    if last_sent is None or data["timestamp"] > last_sent:
-        post_date = human_date_from_ts(data["timestamp"])
-
-        # отправляем сообщение
-        await app.bot.send_message(
-            chat_id=user_id,
-            text=f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n<a href='{data['link']}'>{data['title']}</a>",
-            parse_mode="HTML"
-        )
-
-        # обновляем last_sent
-        state.setdefault(user_id, {})[channel] = data["timestamp"]
-
-async def redis_save(key: str, data):
-    await redis_client.set(key, json.dumps(data, ensure_ascii=False))
-
-async def suggest_channels(user_id: str, wrong_channel: str):
-    subs = await redis_load("subscribers")
-    user_channels = subs.get(user_id, {}).keys()
-
-    suggestions = difflib.get_close_matches(
-        wrong_channel,
-        user_channels,
-        n=3,
-        cutoff=0.5
-    )
-
-    return suggestions
-
-def load_json(path):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-def save_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-def get_ngrok_url():
-    try:
-        r = requests.get("http://127.0.0.1:4040/api/tunnels")
-        tunnels = r.json()["tunnels"]
-        for t in tunnels:
-            if t["proto"] == "https":
-                return t["public_url"]
-    except Exception:
-        return None
-
-def plural(n, str1, str2, str5):
-    return f"" + (
-        str1 if (n % 10 == 1 and n % 100 != 11)
-        else str2 if (2 <= n % 10 <= 4 and (n % 100 < 10 or n % 100 >= 20))
-        else str5
-    )
-
-def save_page(channel: str, txt: str):
-    with open(channel + ".html", "w", encoding="utf-8") as f:
-        f.write(txt)
-
-    print("HTML сохранён в " + channel + ".html")
-
 async def get_last_post_info(channel: str):
     url = f"{URL}{channel}"
 
@@ -283,6 +213,76 @@ def get_last_post_info_(channel: str):
     link = f"{URL}{blog_url}/posts/{post_id}"
 
     return {"title": title, "link": link, "timestamp": timestamp}
+
+async def check_channel_and_notify(app, user_id, channel, state):
+    data = await get_last_post_info(channel)
+    if not data:
+        return
+
+    last_sent = state.get(user_id, {}).get(channel)
+
+    if last_sent is None or data["timestamp"] > last_sent:
+        post_date = human_date_from_ts(data["timestamp"])
+
+        # отправляем сообщение
+        await app.bot.send_message(
+            chat_id=user_id,
+            text=f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n<a href='{data['link']}'>{data['title']}</a>",
+            parse_mode="HTML"
+        )
+
+        # обновляем last_sent
+        state.setdefault(user_id, {})[channel] = data["timestamp"]
+
+async def redis_save(key: str, data):
+    await redis_client.set(key, json.dumps(data, ensure_ascii=False))
+
+async def suggest_channels(user_id: str, wrong_channel: str):
+    subs = await redis_load("subscribers")
+    user_channels = subs.get(user_id, {}).keys()
+
+    suggestions = difflib.get_close_matches(
+        wrong_channel,
+        user_channels,
+        n=3,
+        cutoff=0.5
+    )
+
+    return suggestions
+
+def load_json(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def get_ngrok_url():
+    try:
+        r = requests.get("http://127.0.0.1:4040/api/tunnels")
+        tunnels = r.json()["tunnels"]
+        for t in tunnels:
+            if t["proto"] == "https":
+                return t["public_url"]
+    except Exception:
+        return None
+
+def plural(n, str1, str2, str5):
+    return f"" + (
+        str1 if (n % 10 == 1 and n % 100 != 11)
+        else str2 if (2 <= n % 10 <= 4 and (n % 100 < 10 or n % 100 >= 20))
+        else str5
+    )
+
+def save_page(channel: str, txt: str):
+    with open(channel + ".html", "w", encoding="utf-8") as f:
+        f.write(txt)
+
+    print("HTML сохранён в " + channel + ".html")
 
 # ---------------- TELEGRAM SEND ----------------
 
@@ -394,7 +394,7 @@ async def check_channel(user_id: str, channel: str):
     if channel not in subs.get(user_id, {}):
         return "not_subscribed", None
 
-    data = get_last_post_info(channel)
+    data = await get_last_post_info(channel)
     if not data:
         return "error", None
 
@@ -542,7 +542,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     # Проверяем, что канал существует
-    data = get_last_post_info(channel)
+    data = await get_last_post_info(channel)
     if not data:
         # Автодополнение
         suggestions = suggest_channels(user_id, channel)

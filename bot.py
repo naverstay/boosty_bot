@@ -112,7 +112,7 @@ async def run_due_checks(app):
 
             # Проверяем, пора ли
             if last is None or now - last >= interval_sec:
-                await check_channel_and_notify(app, user_id, channel, state)
+                await check_channel_and_notify(app, user_id, channel, state, last is None)
 
     # Сохраняем обновлённый last_sent
     await redis_save("last_sent", state)
@@ -214,7 +214,7 @@ def get_last_post_info_(channel: str):
 
     return {"title": title, "link": link, "timestamp": timestamp}
 
-async def check_channel_and_notify(app, user_id, channel, state):
+async def check_channel_and_notify(app, user_id, channel, state, skip = False):
     data = await get_last_post_info(channel)
     if not data:
         return
@@ -224,12 +224,13 @@ async def check_channel_and_notify(app, user_id, channel, state):
     if last_sent is None or data["timestamp"] > last_sent:
         post_date = human_date_from_ts(data["timestamp"])
 
-        # отправляем сообщение
-        await app.bot.send_message(
-            chat_id=user_id,
-            text=f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n<a href='{data['link']}'>{data['title']}</a>",
-            parse_mode="HTML"
-        )
+        if not skip:
+            # отправляем сообщение
+            await app.bot.send_message(
+                chat_id=user_id,
+                text=f"Новый пост {post_date} на канале <b>{channel}</b>:\n<a href='{data['link']}'>{data['title']}</a>",
+                parse_mode="HTML"
+            )
 
         # обновляем last_sent
         state.setdefault(user_id, {})[channel] = data["timestamp"]
@@ -406,7 +407,7 @@ async def check_channel(user_id: str, channel: str):
         # отправляем новый пост
         send_message(
             user_id,
-            f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n<a href='{data['link']}'>{data['title']}</a>"
+            f"Новый пост {post_date} на канале <b>{channel}</b>:\n<a href='{data['link']}'>{data['title']}</a>"
         )
 
         # обновляем состояние
@@ -545,19 +546,19 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = await get_last_post_info(channel)
     if not data:
         # Автодополнение
-        suggestions = suggest_channels(user_id, channel)
-
-        if suggestions:
-            text = (
-                f"Канал <b>{channel}</b> не найден.\n"
-                f"Возможно, ты имел в виду:\n"
-                + "\n".join(f"• {s}" for s in suggestions)
-            )
-        else:
-            text = (
-                f"Канал <b>{channel}</b> не найден на Boosty.\n"
-                f"Проверь правильность написания."
-            )
+        # suggestions = suggest_channels(user_id, channel)
+        #
+        # if suggestions:
+        #     text = (
+        #         f"Канал <b>{channel}</b> не найден.\n"
+        #         f"Возможно, ты имел в виду:\n"
+        #         + "\n".join(f"• {s}" for s in suggestions)
+        #     )
+        # else:
+        text = (
+            f"Канал <b>{channel}</b> не найден на Boosty.\n"
+            f"Проверь правильность написания."
+        )
 
         return await update.message.reply_text(text, parse_mode="HTML")
 

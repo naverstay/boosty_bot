@@ -89,7 +89,7 @@ async def scheduler_loop(app):
         # После пробуждения — проверяем только те каналы, у которых наступило время
         await run_due_checks(app)
 
-async def run_due_checks(app):
+async def run_due_checks():
     subs = await redis_load("subscribers")
     state = await redis_load("last_sent")
 
@@ -104,12 +104,12 @@ async def run_due_checks(app):
 
             # Проверяем, пора ли
             if last is None or now - last >= interval_sec:
-                await check_channel_and_notify(app, user_id, channel, state)
+                await check_channel_and_notify(user_id, channel, state)
 
     # Сохраняем обновлённый last_sent
     await redis_save("last_sent", state)
 
-async def check_channel_and_notify(app, user_id, channel, state):
+async def check_channel_and_notify(user_id, channel, state):
     data = get_last_post_info(channel)
     if not data:
         return
@@ -120,14 +120,13 @@ async def check_channel_and_notify(app, user_id, channel, state):
         post_date = human_date_from_ts(data["timestamp"])
 
         # отправляем сообщение
-        await app.bot.send_message(
-            chat_id=user_id,
-            text=f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n<a href='{data['link']}'>{data['title']}</a>"
+        send_message(
+            user_id,
+            f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n<a href='{data['link']}'>{data['title']}</a>"
         )
 
         # обновляем last_sent
         state.setdefault(user_id, {})[channel] = data["timestamp"]
-
 
 async def redis_save(key: str, data):
     await redis_client.set(key, json.dumps(data, ensure_ascii=False))
@@ -288,8 +287,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/unsubscribe <канал>\n"
         "/list — список каналов\n"
         "/setinterval <канал> <интервал>\n"
-        "/forcecheck <канал> — проверить сейчас\n"
-        "/forceall — проверить все подписки сейчас\n"
+        "/check <канал> — проверить сейчас\n"
+        "/checkall — проверить все подписки сейчас\n"
         "/reset <канал> — сбросить last_sent для канала\n"
         "/resetall — сбросить last_sent для всех каналов\n"
         "/debug — режим отладки\n"
@@ -370,9 +369,9 @@ async def check_channel(user_id: str, channel: str):
 
 # ---------------- FORCE CHECK COMMAND ----------------
 
-async def forcecheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        return await update.message.reply_text("Используй: /forcecheck <канал>")
+        return await update.message.reply_text("Используй: /check <канал>")
 
     channel = context.args[0].strip().lower()
     user_id = str(update.effective_user.id)
@@ -396,7 +395,7 @@ async def forcecheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if status == "no_new":
         return await update.message.reply_text("Новых постов нет.")
 
-async def forceall(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def checkall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
 
     subs = await redis_load("subscribers")
@@ -426,7 +425,7 @@ async def forceall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "<b>Результат проверки:</b>\n\n" + "\n".join(results)
     await update.message.reply_text(text, parse_mode="HTML")
 
-async def resetall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def resetall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
 
     state = await redis_load("last_sent")
@@ -446,7 +445,7 @@ async def resetall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Бот снова отправит новые посты при следующей проверке."
     )
 
-async def reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         return await update.message.reply_text("Используй: /reset <канал>")
 
@@ -577,13 +576,13 @@ async def setinterval_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"Пример: 3",
         parse_mode="HTML"
     )
-async def update_interval_and_check(app, user_id, channel, hours):
+async def update_interval_and_check(user_id, channel, hours):
     subs = await redis_load("subscribers")
     subs[user_id][channel]["interval"] = hours
     await redis_save("subscribers", subs)
 
     state = await redis_load("last_sent")
-    await check_channel_and_notify(app, user_id, channel, state)
+    await check_channel_and_notify(user_id, channel, state)
     await redis_save("last_sent", state)
 
 async def setinterval(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -656,8 +655,8 @@ async def setup_commands(app):
         BotCommand("unsubscribe", "Отписаться от канала"),
         BotCommand("list", "Список подписок"),
         BotCommand("setinterval", "Изменить интервал проверки"),
-        BotCommand("forcecheck", "Проверить канал вручную"),
-        BotCommand("forceall", "Проверить все каналы"),
+        BotCommand("check", "Проверить канал вручную"),
+        BotCommand("checkall", "Проверить все каналы"),
         BotCommand("reset", "Сбросить last_sent"),
         BotCommand("resetall", "Сбросить все last_sent"),
         BotCommand("debug", "Отладочная информация"),
@@ -693,10 +692,10 @@ async def lifespan(app: FastAPI):
     telegram_app.add_handler(CommandHandler("list", list_subs))
     telegram_app.add_handler(CommandHandler("help", help_cmd))
     telegram_app.add_handler(CommandHandler("debug", debug_cmd))
-    telegram_app.add_handler(CommandHandler("forcecheck", forcecheck))
-    telegram_app.add_handler(CommandHandler("forceall", forceall))
-    telegram_app.add_handler(CommandHandler("reset", reset_cmd))
-    telegram_app.add_handler(CommandHandler("resetall", resetall_cmd))
+    telegram_app.add_handler(CommandHandler("check", check))
+    telegram_app.add_handler(CommandHandler("checkall", checkall))
+    telegram_app.add_handler(CommandHandler("reset", reset))
+    telegram_app.add_handler(CommandHandler("resetall", resetall))
     telegram_app.add_handler(CallbackQueryHandler(setinterval_button, pattern="^setinterval:"))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, setinterval_value))
 

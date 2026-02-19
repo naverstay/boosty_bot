@@ -1,9 +1,0 @@
-services:
-  - type: worker
-    name: boosty-bot
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    autoDeploy: true
-    envVars:
-      - key: TG_TOKEN
-        sync: false

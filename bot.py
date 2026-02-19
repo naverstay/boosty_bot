@@ -24,7 +24,7 @@ from telegram.ext import (
 load_dotenv()
 
 TG_TOKEN = os.getenv("TG_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL") + TG_TOKEN
 
 SUB_FILE = "subscribers.json"
 STATE_FILE = "last_sent.json"

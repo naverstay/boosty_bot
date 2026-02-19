@@ -252,7 +252,8 @@ async def scheduler_loop(app):
         for user_id, channels in subs.items():
             for channel, cfg in channels.items():
                 interval = cfg.get("interval", 6) * 3600
-                last = state.get(user_id, {}).get(channel)
+                last_raw = state.get(user_id, {}).get(channel)
+                last = int(last_raw) if last_raw is not None else None
 
                 if last is None:
                     next_times.append(now)

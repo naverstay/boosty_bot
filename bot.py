@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
@@ -620,9 +620,30 @@ async def list_subs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "Твои подписки:\n"
     for ch, cfg in user_channels.items():
         t = cfg['interval']
-        text += f"- {ch} (проверка {plural(t, 'каждый', 'каждые', 'каждые')} {'' if t == 1 else t + ' '}{plural(t, 'час', 'часа', 'часов')})\n"
+        text += (
+            f"- {ch} (проверка "
+            f"{plural(t, 'каждый', 'каждые', 'каждые')} "
+            f"{'' if t == 1 else (str(t) + ' ')}"
+            f"{plural(t, 'час', 'часа', 'часов')})\n"
+        )
 
     await update.message.reply_text(text)
+
+async def setup_commands(app):
+    commands = [
+        BotCommand("start", "Начать работу с ботом"),
+        BotCommand("help", "Справка по командам"),
+        BotCommand("subscribe", "Подписаться на канал"),
+        BotCommand("unsubscribe", "Отписаться от канала"),
+        BotCommand("list", "Список подписок"),
+        BotCommand("setinterval", "Изменить интервал проверки"),
+        BotCommand("forcecheck", "Проверить канал вручную"),
+        BotCommand("forceall", "Проверить все каналы"),
+        BotCommand("reset", "Сбросить last_sent"),
+        BotCommand("debug", "Отладочная информация"),
+    ]
+
+    await app.bot.set_my_commands(commands)
 
 # ---------------- FASTAPI + WEBHOOK ----------------
 
@@ -660,6 +681,9 @@ async def lifespan(app: FastAPI):
 
     # 2. ИНИЦИАЛИЗАЦИЯ (обязательно!)
     await telegram_app.initialize()
+
+    # Устанавливаем команды
+    await setup_commands(telegram_app)
 
     # 3. Определяем webhook URL
     webhook_url = WEBHOOK_URL

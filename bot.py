@@ -229,6 +229,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/forcecheck <канал> — проверить сейчас\n"
         "/forceall — проверить все подписки сейчас\n"
         "/reset <канал> — сбросить last_sent для канала\n"
+        "/resetall — сбросить last_sent для всех каналов\n"
         "/debug — режим отладки\n"
         "/help — помощь"
     )
@@ -362,6 +363,26 @@ async def forceall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "<b>Результат проверки:</b>\n\n" + "\n".join(results)
     await update.message.reply_text(text, parse_mode="HTML")
 
+async def resetall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+
+    state = await redis_load("last_sent")
+
+    if user_id not in state or not state[user_id]:
+        return await update.message.reply_text("Нет данных для сброса.")
+
+    count = len(state[user_id])
+
+    # Удаляем все last_sent для пользователя
+    del state[user_id]
+
+    await redis_save("last_sent", state)
+
+    await update.message.reply_text(
+        f"Сброшены last_sent для всех каналов ({count} шт.).\n"
+        f"Бот снова отправит новые посты при следующей проверке."
+    )
+
 async def reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         return await update.message.reply_text("Используй: /reset historipi")
@@ -432,7 +453,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"Подписал на <b>{channel}</b>.\n"
-        f"Последний пост: <b>{data['title']}</b>",
+        f"Последний пост: <b>{data['title']}</b>\n{data['link']}",
         parse_mode="HTML"
     )
 
@@ -640,6 +661,7 @@ async def setup_commands(app):
         BotCommand("forcecheck", "Проверить канал вручную"),
         BotCommand("forceall", "Проверить все каналы"),
         BotCommand("reset", "Сбросить last_sent"),
+        BotCommand("resetall", "Сбросить все last_sent"),
         BotCommand("debug", "Отладочная информация"),
     ]
 
@@ -676,6 +698,7 @@ async def lifespan(app: FastAPI):
     telegram_app.add_handler(CommandHandler("forcecheck", forcecheck))
     telegram_app.add_handler(CommandHandler("forceall", forceall))
     telegram_app.add_handler(CommandHandler("reset", reset_cmd))
+    telegram_app.add_handler(CommandHandler("resetall", resetall_cmd))
     telegram_app.add_handler(CallbackQueryHandler(setinterval_button, pattern="^setinterval:"))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, setinterval_value))
 

@@ -122,7 +122,7 @@ async def check_channel_and_notify(app, user_id, channel, state):
         # отправляем сообщение
         await app.bot.send_message(
             chat_id=user_id,
-            text=f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n<b>{data['title']}</b>\n{data['link']}"
+            text=f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n<a href='{data['link']}'>{data['title']}</a>"
         )
 
         # обновляем last_sent
@@ -286,6 +286,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Команды:\n"
         "/subscribe <канал>\n"
         "/unsubscribe <канал>\n"
+        "/list — список каналов\n"
         "/setinterval <канал> <интервал>\n"
         "/forcecheck <канал> — проверить сейчас\n"
         "/forceall — проверить все подписки сейчас\n"
@@ -346,8 +347,7 @@ async def check_channel(user_id: str, channel: str):
         # отправляем новый пост
         send_message(
             user_id,
-            f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n"
-            f"<b>{data['title']}</b>\n{data['link']}"
+            f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n<a href='{data['link']}'>{data['title']}</a>"
         )
 
         # обновляем состояние
@@ -385,10 +385,10 @@ async def forcecheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("Канал " + channel + " не найден на Boosty.")
 
     if status == "not_subscribed":
-        return await update.message.reply_text("Ты не подписан на этот канал")
+        return await update.message.reply_text("Ты не подписан на этот канал.")
 
     if status == "error":
-        return await update.message.reply_text("Ошибка: не удалось получить данные с Boosty")
+        return await update.message.reply_text("Ошибка: не удалось получить данные с Boosty.")
 
     if status == "new_post":
         return await update.message.reply_text("Готово! Новый пост отправлен.")
@@ -472,7 +472,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        return await update.message.reply_text("Используй: /subscribe historipi")
+        return await update.message.reply_text("Используй: /subscribe <канал>")
 
     channel = context.args[0].strip().lower()
     user_id = str(update.effective_user.id)
@@ -518,7 +518,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"Подписал на <b>{channel}</b>.\n"
-        f"Последний пост {post_date}: <b>{data['title']}</b>\n{data['link']}",
+        f"Последний пост {post_date}\n<a href='{data['link']}'>{data['title']}</a>",
         parse_mode="HTML"
     )
 

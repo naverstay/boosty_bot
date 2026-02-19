@@ -33,19 +33,6 @@ redis_client = None
 
 # ---------------- HELPERS ----------------
 
-def suggest_channels(user_id: str, wrong_channel: str):
-    subs = await redis_load("subscribers")
-    user_channels = subs.get(user_id, {}).keys()
-
-    suggestions = difflib.get_close_matches(
-        wrong_channel,
-        user_channels,
-        n=3,
-        cutoff=0.5
-    )
-
-    return suggestions
-
 async def redis_load(key: str):
     raw = await redis_client.get(key)
     if not raw:
@@ -57,6 +44,19 @@ async def redis_load(key: str):
 
 async def redis_save(key: str, data):
     await redis_client.set(key, json.dumps(data, ensure_ascii=False))
+
+async def suggest_channels(user_id: str, wrong_channel: str):
+    subs = await redis_load("subscribers")
+    user_channels = subs.get(user_id, {}).keys()
+
+    suggestions = difflib.get_close_matches(
+        wrong_channel,
+        user_channels,
+        n=3,
+        cutoff=0.5
+    )
+
+    return suggestions
 
 def load_json(path):
     try:

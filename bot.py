@@ -7,7 +7,7 @@ import zoneinfo
 import difflib
 import redis.asyncio as redis
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
+from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from dotenv import load_dotenv
@@ -33,6 +33,10 @@ URL = "https://boosty.to/"
 redis_client = None
 
 # ---------------- HELPERS ----------------
+
+def human_date_from_ts(ts: int):
+    dt = datetime.fromtimestamp(ts, tz=zoneinfo.ZoneInfo("Europe/Berlin"))
+    return dt.strftime("%d.%m.%Y %H:%M")
 
 def human_date(iso_date: str) -> str:
     dt = datetime.fromisoformat(iso_date)
@@ -113,7 +117,7 @@ async def check_channel_and_notify(app, user_id, channel, state):
     last_sent = state.get(user_id, {}).get(channel)
 
     if last_sent is None or data["timestamp"] > last_sent:
-        post_date = human_date(data["iso_date"])
+        post_date = human_date_from_ts(data["timestamp"])
 
         # отправляем сообщение
         await app.bot.send_message(
@@ -211,6 +215,7 @@ def get_last_post_info(channel: str):
 
     # 4. Достаём данные
     publish_ts = post.get("publishTime")  # UNIX timestamp
+    timestamp = int(publish_ts)
     title = post.get("title") or "(без заголовка)"
     post_id = post.get("id")
     blog_url = post["user"]["blogUrl"]
@@ -218,12 +223,7 @@ def get_last_post_info(channel: str):
     # 5. Формируем ссылку
     link = f"{URL}/{blog_url}/posts/{post_id}"
 
-    # 6. Конвертируем дату
-    dt = datetime.fromtimestamp(publish_ts, tz=zoneinfo.ZoneInfo("UTC"))
-    dt_local = dt.astimezone(zoneinfo.ZoneInfo("Europe/Berlin"))
-    iso_date = dt_local.isoformat()
-
-    return {"title": title, "link": link, "iso_date": iso_date, "timestamp": int(dt.timestamp())}
+    return {"title": title, "link": link, "timestamp": timestamp}
 
 # ---------------- TELEGRAM SEND ----------------
 
@@ -341,7 +341,7 @@ async def check_channel(user_id: str, channel: str):
     last_sent = state.get(user_id, {}).get(channel)
 
     if last_sent != data["link"]:
-        post_date = human_date(data["iso_date"])
+        post_date = human_date_from_ts(data["timestamp"])
 
         # отправляем новый пост
         send_message(
@@ -514,7 +514,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     await redis_save("subscribers", subs)
 
-    post_date = human_date(data["iso_date"])
+    post_date = human_date_from_ts(data["timestamp"])
 
     await update.message.reply_text(
         f"Подписал на <b>{channel}</b>.\n"

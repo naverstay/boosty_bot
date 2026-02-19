@@ -89,7 +89,7 @@ async def scheduler_loop(app):
         # После пробуждения — проверяем только те каналы, у которых наступило время
         await run_due_checks(app)
 
-async def run_due_checks():
+async def run_due_checks(app):
     subs = await redis_load("subscribers")
     state = await redis_load("last_sent")
 
@@ -104,12 +104,12 @@ async def run_due_checks():
 
             # Проверяем, пора ли
             if last is None or now - last >= interval_sec:
-                await check_channel_and_notify(user_id, channel, state)
+                await check_channel_and_notify(app, user_id, channel, state)
 
     # Сохраняем обновлённый last_sent
     await redis_save("last_sent", state)
 
-async def check_channel_and_notify(user_id, channel, state):
+async def check_channel_and_notify(app, user_id, channel, state):
     data = get_last_post_info(channel)
     if not data:
         return
@@ -120,9 +120,10 @@ async def check_channel_and_notify(user_id, channel, state):
         post_date = human_date_from_ts(data["timestamp"])
 
         # отправляем сообщение
-        send_message(
-            user_id,
-            f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n<a href='{data['link']}'>{data['title']}</a>"
+        await app.bot.send_message(
+            chat_id=user_id,
+            text=f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n<a href='{data['link']}'>{data['title']}</a>",
+            parse_mode="HTML"
         )
 
         # обновляем last_sent
@@ -220,7 +221,7 @@ def get_last_post_info(channel: str):
     blog_url = post["user"]["blogUrl"]
 
     # 5. Формируем ссылку
-    link = f"{URL}/{blog_url}/posts/{post_id}"
+    link = f"{URL}{blog_url}/posts/{post_id}"
 
     return {"title": title, "link": link, "timestamp": timestamp}
 
@@ -576,13 +577,13 @@ async def setinterval_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"Пример: 3",
         parse_mode="HTML"
     )
-async def update_interval_and_check(user_id, channel, hours):
+async def update_interval_and_check(app, user_id, channel, hours):
     subs = await redis_load("subscribers")
     subs[user_id][channel]["interval"] = hours
     await redis_save("subscribers", subs)
 
     state = await redis_load("last_sent")
-    await check_channel_and_notify(user_id, channel, state)
+    await check_channel_and_notify(app, user_id, channel, state)
     await redis_save("last_sent", state)
 
 async def setinterval(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -403,8 +403,8 @@ async def debug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         text += f"<b>{ch}</b>\n"
         text += f"  interval: {cfg.get('interval')}h\n"
-        text += f"  last_check: {last_check} ({human_date_from_ts(last_check)})\n"
-        text += f"  last_sent:  {last_sent} ({human_date_from_ts(last_sent)})\n\n"
+        text += f"  last_check: {last_check} {'(' + human_date_from_ts(last_check) + ')' if last_check else ''}\n"
+        text += f"  last_sent:  {last_sent} {'(' + human_date_from_ts(last_sent) + ')' if last_sent else ''}\n\n"
 
     await update.message.reply_text(text, parse_mode="HTML")
 

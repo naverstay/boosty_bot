@@ -224,14 +224,13 @@ async def check_channel_and_notify(app, user_id, channel, state, skip = False):
     if last_sent is None or data["timestamp"] > last_sent:
         post_date = human_date_from_ts(data["timestamp"])
 
-        # if not skip:
-        # отправляем сообщение
-
-        await app.bot.send_message(
-            chat_id=user_id,
-            text=f"Новый пост {post_date} на канале <b>{channel}</b>:\n<a href='{data['link']}'>{data['title']}</a>",
-            parse_mode="HTML"
-        )
+        if not skip:
+            # отправляем сообщение
+            await app.bot.send_message(
+                chat_id=user_id,
+                text=f"Новый пост {post_date} на канале <b>{channel}</b>:\n<a href='{data['link']}'>{data['title']}</a>",
+                parse_mode="HTML"
+            )
 
         # обновляем last_sent
         state.setdefault(user_id, {})[channel] = data["timestamp"]
@@ -644,7 +643,7 @@ async def update_interval_and_check(app, user_id, channel, hours):
     await redis_save("subscribers", subs)
 
     state = await redis_load("last_sent")
-    await check_channel_and_notify(app, user_id, channel, state)
+    await check_channel_and_notify(app, user_id, channel, state, True)
     await redis_save("last_sent", state)
 
 async def setinterval(update: Update, context: ContextTypes.DEFAULT_TYPE):

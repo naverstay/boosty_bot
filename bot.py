@@ -112,7 +112,7 @@ async def check_channel_and_notify(app, user_id, channel, state):
 
     last_sent = state.get(user_id, {}).get(channel)
 
-    if last_sent is None or data["timestamp"] > last_sent:
+    if last_sent is None or data["iso_date"] > last_sent:
         post_date = human_date(data['iso_date'])
 
         # отправляем сообщение
@@ -122,7 +122,7 @@ async def check_channel_and_notify(app, user_id, channel, state):
         )
 
         # обновляем last_sent
-        state.setdefault(user_id, {})[channel] = data["timestamp"]
+        state.setdefault(user_id, {})[channel] = data["iso_date"]
 
 
 async def redis_save(key: str, data):

@@ -353,7 +353,7 @@ async def check_channel(user_id: str, channel: str):
         # обновляем состояние
         state.setdefault(user_id, {})
         state[user_id][channel] = data["link"]
-        subs[user_id][channel]["last_check"] = datetime.utcnow().isoformat()
+        subs[user_id][channel]["last_check"] = int(datetime.utcnow().timestamp())
 
         await redis_save("subscribers", subs)
         await redis_save("last_sent", state)
@@ -362,7 +362,7 @@ async def check_channel(user_id: str, channel: str):
 
     else:
         # обновляем только last_check
-        subs[user_id][channel]["last_check"] = datetime.utcnow().isoformat()
+        subs[user_id][channel]["last_check"] = int(datetime.utcnow().timestamp())
         await redis_save("subscribers", subs)
 
         return "no_new", None

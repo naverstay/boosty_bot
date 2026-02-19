@@ -33,6 +33,10 @@ redis_client = None
 
 # ---------------- HELPERS ----------------
 
+def human_date(iso_date: str) -> str:
+    dt = datetime.fromisoformat(iso_date)
+    return dt.strftime("%d.%m.%Y %H:%M")
+
 async def redis_load(key: str):
     raw = await redis_client.get(key)
     if not raw:
@@ -189,9 +193,10 @@ async def scheduler_loop(app):
                 last_sent = state.get(user_id, {}).get(channel)
 
                 if last_sent != data["link"]:
+                    post_date = human_date(data['iso_date'])
                     send_message(
                         user_id,
-                        f"Новый пост на канале <b>{channel}</b>:\n\n"
+                        f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n"
                         f"<b>{data['title']}</b>\n{data['link']}"
                     )
 
@@ -280,10 +285,12 @@ async def check_channel(user_id: str, channel: str):
     last_sent = state.get(user_id, {}).get(channel)
 
     if last_sent != data["link"]:
+        post_date = human_date(data['iso_date'])
+
         # отправляем новый пост
         send_message(
             user_id,
-            f"Новый пост на канале <b>{channel}</b>:\n\n"
+            f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n"
             f"<b>{data['title']}</b>\n{data['link']}"
         )
 

@@ -42,6 +42,14 @@ def human_date(iso_date: str) -> str:
     dt = datetime.fromisoformat(iso_date)
     return dt.strftime("%d.%m.%Y %H:%M")
 
+async def fetch_requests(url, timeout=3):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: requests.get(url, timeout=timeout)
+    )
+
+
 async def redis_load(key: str):
     raw = await redis_client.get(key)
     if not raw:
@@ -179,7 +187,58 @@ def save_page(channel: str, txt: str):
 
     print("HTML сохранён в " + channel + ".html")
 
-def get_last_post_info(channel: str):
+async def get_last_post_info(channel: str):
+    url = f"{URL}{channel}"
+
+    try:
+        r = await fetch_requests(url)
+        r.raise_for_status()
+    except Exception as e:
+        print(f"[{channel}] Ошибка запроса: {e}")
+        return None
+
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    script_tag = soup.find("script", {"id": "initial-state"})
+    if not script_tag:
+        print(f"[{channel}] initial-state не найден")
+        return None
+
+    try:
+        data = json.loads(script_tag.text)
+    except Exception as e:
+        print(f"[{channel}] Ошибка JSON: {e}")
+        return None
+
+    try:
+        posts = data["posts"]["postsList"]["data"]["posts"]
+        if not posts:
+            print(f"[{channel}] Постов нет")
+            return None
+    except KeyError:
+        print(f"[{channel}] postsList не найден")
+        return None
+
+    post = posts[0]
+
+    publish_ts = post.get("publishTime")
+    if not publish_ts:
+        return None
+
+    timestamp = int(publish_ts)
+    title = post.get("title") or "(без заголовка)"
+    post_id = post.get("id")
+    blog_url = post["user"]["blogUrl"]
+
+    link = f"{URL}{blog_url}/posts/{post_id}"
+
+    return {
+        "title": title,
+        "link": link,
+        "timestamp": timestamp
+    }
+
+def get_last_post_info_(channel: str):
     url = f"{URL}{channel}"
     r = requests.get(url, timeout=10)
     r.raise_for_status()

@@ -32,15 +32,20 @@ URL = "https://boosty.to/"
 
 redis_client = None
 
+
 # ---------------- HELPERS ----------------
 
 def human_date_from_ts(ts: int):
-    dt = datetime.fromtimestamp(ts, tz=zoneinfo.ZoneInfo("Europe/Berlin"))
+    dt = datetime.fromtimestamp(ts
+                                # , tz=zoneinfo.ZoneInfo("Europe/Berlin")
+                                )
     return dt.strftime("%d.%m.%Y %H:%M")
+
 
 def human_date(iso_date: str) -> str:
     dt = datetime.fromisoformat(iso_date)
     return dt.strftime("%d.%m.%Y %H:%M")
+
 
 async def fetch_requests(url, timeout=3):
     loop = asyncio.get_running_loop()
@@ -58,6 +63,7 @@ async def redis_load(key: str):
         return json.loads(raw)
     except:
         return {}
+
 
 async def scheduler_loop(app):
     while True:
@@ -97,6 +103,7 @@ async def scheduler_loop(app):
         # После пробуждения — проверяем только те каналы, у которых наступило время
         await run_due_checks(app)
 
+
 async def run_due_checks(app):
     subs = await redis_load("subscribers")
     state = await redis_load("last_sent")
@@ -116,6 +123,7 @@ async def run_due_checks(app):
 
     # Сохраняем обновлённый last_sent
     await redis_save("last_sent", state)
+
 
 async def get_last_post_info(channel: str):
     url = f"{URL}{channel}"
@@ -168,12 +176,13 @@ async def get_last_post_info(channel: str):
         "timestamp": timestamp
     }
 
+
 def get_last_post_info_(channel: str):
     url = f"{URL}{channel}"
     r = requests.get(url, timeout=10)
     r.raise_for_status()
 
-#     save_page(channel, r.text)
+    #     save_page(channel, r.text)
 
     soup = BeautifulSoup(r.text, "html.parser")
 
@@ -214,7 +223,8 @@ def get_last_post_info_(channel: str):
 
     return {"title": title, "link": link, "timestamp": timestamp}
 
-async def check_channel_and_notify(app, user_id, channel, state, skip = False):
+
+async def check_channel_and_notify(app, user_id, channel, state, skip=False):
     data = await get_last_post_info(channel)
     if not data:
         return
@@ -235,8 +245,10 @@ async def check_channel_and_notify(app, user_id, channel, state, skip = False):
         # обновляем last_sent
         state.setdefault(user_id, {})[channel] = data["timestamp"]
 
+
 async def redis_save(key: str, data):
     await redis_client.set(key, json.dumps(data, ensure_ascii=False))
+
 
 async def suggest_channels(user_id: str, wrong_channel: str):
     subs = await redis_load("subscribers")
@@ -251,6 +263,7 @@ async def suggest_channels(user_id: str, wrong_channel: str):
 
     return suggestions
 
+
 def load_json(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -258,9 +271,11 @@ def load_json(path):
     except Exception:
         return {}
 
+
 def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 def get_ngrok_url():
     try:
@@ -272,6 +287,7 @@ def get_ngrok_url():
     except Exception:
         return None
 
+
 def plural(n, str1, str2, str5):
     return f"" + (
         str1 if (n % 10 == 1 and n % 100 != 11)
@@ -279,11 +295,13 @@ def plural(n, str1, str2, str5):
         else str5
     )
 
+
 def save_page(channel: str, txt: str):
     with open(channel + ".html", "w", encoding="utf-8") as f:
         f.write(txt)
 
     print("HTML сохранён в " + channel + ".html")
+
 
 # ---------------- TELEGRAM SEND ----------------
 
@@ -298,6 +316,7 @@ def send_message(user_id, text):
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
         print("Ошибка отправки:", e)
+
 
 # ---------------- SCHEDULER ----------------
 
@@ -331,6 +350,7 @@ async def scheduler_loop(app):
 
         await run_due_checks(app)
 
+
 # ---------------- TELEGRAM BOT ----------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -356,6 +376,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/help — помощь"
     )
 
+
 # ---------------- DEBUG COMMAND ----------------
 
 async def debug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -369,7 +390,7 @@ async def debug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.utcnow().isoformat()
 
     text = f"<b>DEBUG INFO</b>\n\n"
-    text += f"Server time (UTC): {now}\n"
+    text += f"Server time (UTC): {now} ({human_date_from_ts(int(datetime.utcnow().timestamp()))})\n"
     text += f"Subscriptions: {len(user_channels)}\n\n"
 
     if not user_channels:
@@ -382,8 +403,8 @@ async def debug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         text += f"<b>{ch}</b>\n"
         text += f"  interval: {cfg.get('interval')}h\n"
-        text += f"  last_check: {last_check}\n"
-        text += f"  last_sent: {last_sent}\n\n"
+        text += f"  last_check: {last_check} ({human_date_from_ts(last_check)})\n"
+        text += f"  last_sent:  {last_sent} ({human_date_from_ts(last_sent)})\n\n"
 
     await update.message.reply_text(text, parse_mode="HTML")
 
@@ -456,6 +477,7 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if status == "no_new":
         return await update.message.reply_text("Новых постов нет.")
 
+
 async def checkall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
 
@@ -486,6 +508,7 @@ async def checkall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "<b>Результат проверки:</b>\n\n" + "\n".join(results)
     await update.message.reply_text(text, parse_mode="HTML")
 
+
 async def resetall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
 
@@ -505,6 +528,7 @@ async def resetall(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Сброшены last_sent для всех каналов ({count} шт.).\n"
         f"Бот снова отправит новые посты при следующей проверке."
     )
+
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -527,8 +551,10 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"last_sent для <b>{channel}</b> сброшен.", parse_mode="HTML")
 
+
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
+
 
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -582,6 +608,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+
 async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         return await update.message.reply_text("Используй: /unsubscribe <канал>")
@@ -598,6 +625,7 @@ async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await redis_save("subscribers", subs)
 
     await update.message.reply_text(f"Отписал от {channel}")
+
 
 async def setinterval_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
@@ -622,6 +650,7 @@ async def setinterval_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+
 async def setinterval_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -637,6 +666,8 @@ async def setinterval_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"Пример: 3",
         parse_mode="HTML"
     )
+
+
 async def update_interval_and_check(app, user_id, channel, hours):
     subs = await redis_load("subscribers")
     subs[user_id][channel]["interval"] = hours
@@ -645,6 +676,7 @@ async def update_interval_and_check(app, user_id, channel, hours):
     state = await redis_load("last_sent")
     await check_channel_and_notify(app, user_id, channel, state, True)
     await redis_save("last_sent", state)
+
 
 async def setinterval(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
@@ -688,6 +720,7 @@ async def setinterval(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
+
 async def list_subs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     subs = await redis_load("subscribers")
@@ -708,6 +741,7 @@ async def list_subs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(text)
 
+
 async def setup_commands(app):
     commands = [
         BotCommand("start", "Начать работу с ботом"),
@@ -725,9 +759,11 @@ async def setup_commands(app):
 
     await app.bot.set_my_commands(commands)
 
+
 # ---------------- FASTAPI + WEBHOOK ----------------
 
 telegram_app = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -792,7 +828,9 @@ async def lifespan(app: FastAPI):
     # 7. Корректное завершение
     await telegram_app.shutdown()
 
+
 app = FastAPI(lifespan=lifespan)
+
 
 @app.post("/webhook/{token}")
 async def webhook(token: str, request: Request):
@@ -805,13 +843,16 @@ async def webhook(token: str, request: Request):
 
     return {"status": "ok"}
 
+
 @app.api_route("/", methods=["GET", "HEAD"])
 def root():
     return {"status": "ok"}
+
 
 # ---------------- MAIN ----------------
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10000))
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=port)

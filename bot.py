@@ -700,7 +700,7 @@ async def webhook(token: str, request: Request):
 
     return {"status": "ok"}
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def root():
     return {"status": "ok"}
 

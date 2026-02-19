@@ -112,8 +112,8 @@ async def check_channel_and_notify(app, user_id, channel, state):
 
     last_sent = state.get(user_id, {}).get(channel)
 
-    if last_sent is None or data["iso_date"] > last_sent:
-        post_date = human_date(data['iso_date'])
+    if last_sent is None or data["timestamp"] > last_sent:
+        post_date = human_date(data["iso_date"])
 
         # отправляем сообщение
         await app.bot.send_message(
@@ -122,7 +122,7 @@ async def check_channel_and_notify(app, user_id, channel, state):
         )
 
         # обновляем last_sent
-        state.setdefault(user_id, {})[channel] = data["iso_date"]
+        state.setdefault(user_id, {})[channel] = data["timestamp"]
 
 
 async def redis_save(key: str, data):
@@ -223,7 +223,7 @@ def get_last_post_info(channel: str):
     dt_local = dt.astimezone(zoneinfo.ZoneInfo("Europe/Berlin"))
     iso_date = dt_local.isoformat()
 
-    return {"title": title, "link": link, "iso_date": iso_date}
+    return {"title": title, "link": link, "iso_date": iso_date, "timestamp": int(dt.timestamp())}
 
 # ---------------- TELEGRAM SEND ----------------
 
@@ -341,7 +341,7 @@ async def check_channel(user_id: str, channel: str):
     last_sent = state.get(user_id, {}).get(channel)
 
     if last_sent != data["link"]:
-        post_date = human_date(data['iso_date'])
+        post_date = human_date(data["iso_date"])
 
         # отправляем новый пост
         send_message(
@@ -372,7 +372,7 @@ async def check_channel(user_id: str, channel: str):
 
 async def forcecheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        return await update.message.reply_text("Используй: /forcecheck historipi")
+        return await update.message.reply_text("Используй: /forcecheck <канал>")
 
     channel = context.args[0].strip().lower()
     user_id = str(update.effective_user.id)
@@ -448,7 +448,7 @@ async def resetall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        return await update.message.reply_text("Используй: /reset historipi")
+        return await update.message.reply_text("Используй: /reset <канал>")
 
     channel = context.args[0].strip().lower()
     user_id = str(update.effective_user.id)
@@ -514,15 +514,17 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     await redis_save("subscribers", subs)
 
+    post_date = human_date(data["iso_date"])
+
     await update.message.reply_text(
         f"Подписал на <b>{channel}</b>.\n"
-        f"Последний пост: <b>{data['title']}</b>\n{data['link']}",
+        f"Последний пост {post_date}: <b>{data['title']}</b>\n{data['link']}",
         parse_mode="HTML"
     )
 
 async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        return await update.message.reply_text("Используй: /unsubscribe historipi")
+        return await update.message.reply_text("Используй: /unsubscribe <канал>")
 
     channel = context.args[0].strip().lower()
     user_id = str(update.effective_user.id)

@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import asyncio
 import requests
 import zoneinfo
@@ -46,6 +47,84 @@ async def redis_load(key: str):
     except:
         return {}
 
+async def scheduler_loop(app):
+    while True:
+        subs = await redis_load("subscribers")
+        state = await redis_load("last_sent")
+
+        now = time.time()
+        next_times = []
+
+        # Собираем время следующей проверки для каждого канала
+        for user_id, channels in subs.items():
+            for channel, cfg in channels.items():
+                interval_hours = cfg.get("interval", 6)
+                interval_sec = interval_hours * 3600
+
+                last = state.get(user_id, {}).get(channel)
+                if last is None:
+                    # Никогда не проверяли — проверяем сейчас
+                    next_times.append(now)
+                else:
+                    next_times.append(last + interval_sec)
+
+        # Если нет подписок — спим 10 минут
+        if not next_times:
+            await asyncio.sleep(600)
+            continue
+
+        # Находим ближайшее время проверки
+        next_check = min(next_times)
+
+        # Сколько спать
+        sleep_time = max(0, next_check - now)
+
+        # Спим ровно до нужного момента
+        await asyncio.sleep(sleep_time)
+
+        # После пробуждения — проверяем только те каналы, у которых наступило время
+        await run_due_checks(app)
+
+async def run_due_checks(app):
+    subs = await redis_load("subscribers")
+    state = await redis_load("last_sent")
+
+    now = time.time()
+
+    for user_id, channels in subs.items():
+        for channel, cfg in channels.items():
+            interval_hours = cfg.get("interval", 6)
+            interval_sec = interval_hours * 3600
+
+            last = state.get(user_id, {}).get(channel)
+
+            # Проверяем, пора ли
+            if last is None or now - last >= interval_sec:
+                await check_channel_and_notify(app, user_id, channel, state)
+
+    # Сохраняем обновлённый last_sent
+    await redis_save("last_sent", state)
+
+async def check_channel_and_notify(app, user_id, channel, state):
+    data = get_last_post_info(channel)
+    if not data:
+        return
+
+    last_sent = state.get(user_id, {}).get(channel)
+
+    if last_sent is None or data["timestamp"] > last_sent:
+        post_date = human_date(data['iso_date'])
+
+        # отправляем сообщение
+        await app.bot.send_message(
+            chat_id=user_id,
+            text=f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n<b>{data['title']}</b>\n{data['link']}"
+        )
+
+        # обновляем last_sent
+        state.setdefault(user_id, {})[channel] = data["timestamp"]
+
+
 async def redis_save(key: str, data):
     await redis_client.set(key, json.dumps(data, ensure_ascii=False))
 
@@ -89,8 +168,6 @@ def plural(n, str1, str2, str5):
         else str2 if (2 <= n % 10 <= 4 and (n % 100 < 10 or n % 100 >= 20))
         else str5
     )
-
-# ---------------- BOOSTY CRAWLER ----------------
 
 def save_page(channel: str, txt: str):
     with open(channel + ".html", "w", encoding="utf-8") as f:
@@ -165,55 +242,33 @@ def send_message(user_id, text):
 # ---------------- SCHEDULER ----------------
 
 async def scheduler_loop(app):
-    print("Scheduler started")
-
     while True:
         subs = await redis_load("subscribers")
         state = await redis_load("last_sent")
-        now = datetime.utcnow()
+
+        now = time.time()
+        next_times = []
 
         for user_id, channels in subs.items():
             for channel, cfg in channels.items():
+                interval = cfg.get("interval", 6) * 3600
+                last = state.get(user_id, {}).get(channel)
 
-                interval = cfg.get("interval", 6)
-                last_check_str = cfg.get("last_check")
-
-                if last_check_str:
-                    last_check = datetime.fromisoformat(last_check_str)
+                if last is None:
+                    next_times.append(now)
                 else:
-                    last_check = now - timedelta(hours=interval)
+                    next_times.append(last + interval)
 
-                if now - last_check < timedelta(hours=interval):
-                    continue
+        if not next_times:
+            await asyncio.sleep(600)
+            continue
 
-                data = get_last_post_info(channel)
-                if not data:
-                    continue
+        next_check = min(next_times)
+        sleep_time = max(0, next_check - now)
 
-                last_sent = state.get(user_id, {}).get(channel)
+        await asyncio.sleep(sleep_time)
 
-                if last_sent != data["link"]:
-                    post_date = human_date(data['iso_date'])
-                    send_message(
-                        user_id,
-                        f"Новый пост {post_date} на канале <b>{channel}</b>:\n\n"
-                        f"<b>{data['title']}</b>\n{data['link']}"
-                    )
-
-                    state.setdefault(user_id, {})
-                    state[user_id][channel] = data["link"]
-                else:
-                    send_message(
-                        user_id,
-                        f"Новых постов на <b>{channel}</b> нет."
-                    )
-
-                subs[user_id][channel]["last_check"] = now.isoformat()
-
-        await redis_save("subscribers", subs)
-        await redis_save("last_sent", state)
-
-        await asyncio.sleep(60)
+        await run_due_checks(app)
 
 # ---------------- TELEGRAM BOT ----------------
 
@@ -495,8 +550,7 @@ async def setinterval_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         return await update.message.reply_text("Интервал должен быть числом.")
 
-    subs[user_id][channel]["interval"] = hours
-    await redis_save("subscribers", subs)
+    await update_interval_and_check(context.application, user_id, channel, hours)
 
     del context.user_data["setinterval_channel"]
 
@@ -520,6 +574,14 @@ async def setinterval_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"Пример: 3",
         parse_mode="HTML"
     )
+async def update_interval_and_check(app, user_id, channel, hours):
+    subs = await redis_load("subscribers")
+    subs[user_id][channel]["interval"] = hours
+    await redis_save("subscribers", subs)
+
+    state = await redis_load("last_sent")
+    await check_channel_and_notify(app, user_id, channel, state)
+    await redis_save("last_sent", state)
 
 async def setinterval(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
@@ -543,8 +605,7 @@ async def setinterval(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             return await update.message.reply_text("Интервал должен быть числом.")
 
-        subs[user_id][channel]["interval"] = hours
-        await redis_save("subscribers", subs)
+        await update_interval_and_check(context.application, user_id, channel, hours)
 
         return await update.message.reply_text(
             f"Интервал для <b>{channel}</b> обновлён: {hours} ч.",
@@ -563,79 +624,6 @@ async def setinterval(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Выбери канал, для которого хочешь изменить интервал:",
         reply_markup=reply_markup
     )
-
-async def setinterval_(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    subs = await redis_load("subscribers")
-    user_channels = subs.get(user_id, {})
-
-    # Если нет аргументов — показать список каналов
-    if len(context.args) == 0:
-        if not user_channels:
-            return await update.message.reply_text("У тебя нет подписок.")
-
-        text = "Ты подписан на эти каналы:\n"
-        for ch in user_channels.keys():
-            text += f"• {ch}\n"
-
-        text += "\nИспользуй: /setinterval <канал> <часы>"
-        return await update.message.reply_text(text)
-
-    # Если указан только канал — подсказать формат
-    if len(context.args) == 1:
-        channel = context.args[0].strip().lower()
-
-        if channel not in user_channels:
-            # автодополнение
-            suggestions = suggest_channels(user_id, channel)
-            if suggestions:
-                text = (
-                    f"Канал <b>{channel}</b> не найден.\n"
-                    f"Возможно, ты имел в виду:\n" +
-                    "\n".join(f"• {s}" for s in suggestions)
-                )
-            else:
-                text = f"Канал <b>{channel}</b> не найден среди твоих подписок."
-
-            text += "\n\nИспользуй: /setinterval <канал> <часы>"
-            return await update.message.reply_text(text, parse_mode="HTML")
-
-        return await update.message.reply_text(
-            "Укажи интервал в часах.\nПример: /setinterval historipi 3"
-        )
-
-    # Полный формат: /setinterval <канал> <часы>
-    channel = context.args[0].strip().lower()
-    hours = context.args[1]
-
-    # Проверка, что канал есть
-    if channel not in user_channels:
-        suggestions = suggest_channels(user_id, channel)
-        if suggestions:
-            text = (
-                f"Канал <b>{channel}</b> не найден.\n"
-                f"Возможно, ты имел в виду:\n" +
-                "\n".join(f"• {s}" for s in suggestions)
-            )
-        else:
-            text = f"Канал <b>{channel}</b> не найден среди твоих подписок."
-
-        return await update.message.reply_text(text, parse_mode="HTML")
-
-    # Проверка, что интервал — число
-    try:
-        hours = int(hours)
-    except ValueError:
-        return await update.message.reply_text("Интервал должен быть числом.")
-
-    subs[user_id][channel]["interval"] = hours
-    await redis_save("subscribers", subs)
-
-    await update.message.reply_text(
-        f"Интервал для <b>{channel}</b> обновлён: {hours} ч.",
-        parse_mode="HTML"
-    )
-
 
 async def list_subs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)

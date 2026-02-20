@@ -5,4 +5,4 @@ requests
 tzdata
 beautifulsoup4
 python-dotenv
-redis
+redis>=4.2.0

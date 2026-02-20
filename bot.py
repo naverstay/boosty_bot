@@ -382,7 +382,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if channel in subs:
             del subs[channel]
             await db_save_user_subs(user_id, subs)
-            await query.edit_message_text(f"✅ Ты отписался от <b>{channel}</b>", parse_mode="HTML")
+            await query.edit_message_text(f"✅ Подписка на <b>{channel}</b> удалена.", parse_mode="HTML")
+        else:
+            await query.edit_message_text("Ошибка: подписка уже была удалена ранее.")
 
     elif action == "check_pick":
         await query.edit_message_text(f"⏳ Проверяю <b>{channel}</b>...", parse_mode="HTML")
@@ -476,6 +478,35 @@ async def subscribe_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🎉 Успешно! Последний пост был {human_date_from_ts(post['timestamp'])}.")
 
 
+async def unsubscribe_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = str(update.effective_user.id)
+    subs = await db_get_user_subs(user_id)
+
+    if not subs:
+        await update.message.reply_text("У тебя пока нет активных подписок.")
+        return
+
+    # Если канал указан текстом: /unsubscribe kuji
+    if context.args:
+        channel = context.args[0].strip().lower()
+        if channel in subs:
+            del subs[channel]
+            await db_save_user_subs(user_id, subs)
+            await update.message.reply_text(f"✅ Ты успешно отписался от <b>{channel}</b>.", parse_mode="HTML")
+        else:
+            await update.message.reply_text(f"❌ Ты не подписан на канал {channel}.")
+        return
+
+    # Если аргумента нет — выводим список кнопок
+    keyboard = [[InlineKeyboardButton(f"❌ {ch}", callback_data=f"unsub_pick:{ch}")] for ch in subs.keys()]
+
+    await update.message.reply_text(
+        "Выбери канал, от которого хочешь отписаться:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return
+
+
 async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     subs = await db_get_user_subs(user_id)
@@ -486,7 +517,11 @@ async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "📋 <b>Твои подписки:</b>\n\n"
     keyboard = []
     for ch, cfg in subs.items():
-        text += f"• {ch} (каждые {cfg['interval']}ч)\n"
+        t = cfg['interval']
+        text += (f"• <b>{ch}</b>\n{plural(t, 'каждый', 'каждые', 'каждые')} "
+                 f"{'' if t == 1 else (str(t) + ' ')}"
+                 f"{plural(t, 'час', 'часа', 'часов')})\n"
+                 )
         keyboard.append([InlineKeyboardButton(f"❌ Отписаться от {ch}", callback_data=f"unsub_pick:{ch}")])
 
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -506,6 +541,7 @@ async def lifespan(app: FastAPI):
     # Регистрация
     telegram_app.add_handler(CommandHandler("start", start_cmd))
     telegram_app.add_handler(CommandHandler("subscribe", subscribe_cmd))
+    telegram_app.add_handler(CommandHandler("unsubscribe", unsubscribe_cmd))
     telegram_app.add_handler(CommandHandler("list", list_cmd))
     telegram_app.add_handler(CommandHandler("help", help_cmd))
     telegram_app.add_handler(CommandHandler("debug", debug_cmd))
@@ -546,10 +582,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+
 @app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     """Эндпоинт для проверки работоспособности сервера (Health Check)"""
     return {"status": "ok"}
+
 
 @app.post("/webhook/{token}")
 async def webhook(token: str, request: Request):

@@ -24,7 +24,7 @@ from telegram.ext import (
 load_dotenv()
 TG_TOKEN = os.getenv("TG_TOKEN")
 # Ожидается URL без токена в конце, например https://myapp.com
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL") + TG_TOKEN
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 BOOSTY_BASE_URL = "https://boosty.to/"
 
@@ -141,10 +141,9 @@ async def check_and_notify(user_id: str, channel: str, user_subs: dict, skip_msg
 
     if is_new:
         if not skip_msg:
-            text = (f"🔔 <b>Новый пост на {channel}!</b>\n\n"
-                    f"📝 {post['title']}\n"
-                    f"📅 {human_date_from_ts(post['timestamp'])}\n"
-                    f"🔗 <a href='{post['link']}'>Читать на Boosty</a>")
+            text = (f"🔔 <b>Новый пост на {channel}!</b>\n"
+                    f"📅 {human_date_from_ts(post['timestamp'])}\n\n"
+                    f"🔗 <a href='{post['link']}'>{post['title']}</a>")
             try:
                 await telegram_app.bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
             except Exception as e:
@@ -238,7 +237,7 @@ async def debug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode="HTML")
 
 
-async def resetall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def reset_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сброс last_sent для всех подписок пользователя"""
     user_id = str(update.effective_user.id)
     subs = await db_get_user_subs(user_id)
@@ -257,7 +256,7 @@ async def resetall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def checkall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def check_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     subs = await db_get_user_subs(user_id)
 
@@ -335,7 +334,7 @@ async def reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return
 
 
-async def setinterval_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def set_interval_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     subs = await db_get_user_subs(user_id)
 
@@ -401,7 +400,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "setint_pick":
         # Устанавливаем состояние ожидания ввода числа
         context.user_data["awaiting_interval_for"] = channel
-        await query.edit_message_text(f"Введите новый интервал (в часах) для <b>{channel}</b>:", parse_mode="HTML")
+        await query.edit_message_text(f"Введите новый интервал в часах для <b>{channel}</b>:", parse_mode="HTML")
 
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -511,10 +510,10 @@ async def lifespan(app: FastAPI):
     telegram_app.add_handler(CommandHandler("help", help_cmd))
     telegram_app.add_handler(CommandHandler("debug", debug_cmd))
     telegram_app.add_handler(CommandHandler("check", check_cmd))
-    telegram_app.add_handler(CommandHandler("checkall", checkall_cmd))
+    telegram_app.add_handler(CommandHandler("checkall", check_all_cmd))
     telegram_app.add_handler(CommandHandler("reset", reset_cmd))
-    telegram_app.add_handler(CommandHandler("resetall", resetall_cmd))
-    telegram_app.add_handler(CommandHandler("setinterval", setinterval_cmd))
+    telegram_app.add_handler(CommandHandler("resetall", reset_all_cmd))
+    telegram_app.add_handler(CommandHandler("setinterval", set_interval_cmd))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     telegram_app.add_handler(CallbackQueryHandler(button_handler))
 

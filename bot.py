@@ -86,16 +86,19 @@ async def fetch_boosty_page(channel: str, timeout=10):
 
 async def get_last_post_info(channel: str):
     html = await fetch_boosty_page(channel)
-    if not html: return None
+    if not html:
+        return None
 
     soup = BeautifulSoup(html, "html.parser")
     script_tag = soup.find("script", {"id": "initial-state"})
-    if not script_tag: return None
+    if not script_tag:
+        return None
 
     try:
         data = json.loads(script_tag.text)
         posts = data["posts"]["postsList"]["data"]["posts"]
-        if not posts: return None
+        if not posts:
+            return None
 
         post = posts[0]
         return {
@@ -107,8 +110,8 @@ async def get_last_post_info(channel: str):
     except (KeyError, json.JSONDecodeError, IndexError):
         return None
 
+    # ---------------- REDIS LOGIC (HSET/HGET) ----------------
 
-# ---------------- REDIS LOGIC (HSET/HGET) ----------------
 
 async def db_get_user_subs(user_id: str) -> dict:
     """Получает все подписки пользователя из Redis Hash"""
@@ -204,11 +207,14 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "❓ <b>Справка по командам:</b>\n\n"
         "/subscribe <code>name</code> — подписаться на канал\n"
         "/unsubscribe — выбрать канал для удаления\n"
-        "/list — список ваших подписок\n"
-        "/setinterval — изменить частоту проверок\n"
-        "/checkall — проверить все посты прямо сейчас\n"
-        "/reset <code>name</code> — сбросить память бота о последнем посте\n"
+        "/list — список каналов\n"
+        "/setinterval <code>name</code> <code>time</code> — изменить частоту проверок канала\n"
+        "/check <code>name</code> — проверить канал сейчас\n"
+        "/checkall — проверить все каналы сейчас\n"
+        "/reset <code>name</code> — сбросить последнее уведомление для канала\n"
+        "/resetall — сбросить последнее уведомление для всех каналов\n"
         "/debug — техническая информация\n"
+        "/help — помощь"
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
@@ -238,7 +244,8 @@ async def resetall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     subs = await db_get_user_subs(user_id)
 
     if not subs:
-        return await update.message.reply_text("У тебя нет подписок для сброса.")
+        await update.message.reply_text("У тебя нет подписок для сброса.")
+        return
 
     for channel in subs:
         subs[channel]["last_sent"] = None
@@ -255,7 +262,8 @@ async def checkall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     subs = await db_get_user_subs(user_id)
 
     if not subs:
-        return await update.message.reply_text("У тебя нет подписок.")
+        await update.message.reply_text("У тебя нет подписок.")
+        return
 
     msg = await update.message.reply_text("🔄 Начинаю полную проверку всех каналов...")
 
@@ -272,19 +280,23 @@ async def checkall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await msg.edit_text("<b>Результаты проверки:</b>\n\n" + "\n".join(results), parse_mode="HTML")
 
+    return
+
 
 async def check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     subs = await db_get_user_subs(user_id)
 
     if not subs:
-        return await update.message.reply_text("У тебя нет подписок.")
+        await update.message.reply_text("У тебя нет подписок.")
+        return
 
-    # Если аргумент есть: /check name
+        # Если аргумент есть: /check name
     if context.args:
         channel = context.args[0].strip().lower()
         if channel not in subs:
-            return await update.message.reply_text(f"Ты не подписан на {channel}.")
+            await update.message.reply_text(f"Ты не подписан на {channel}.")
+            return
 
         await update.message.reply_text(f"⏳ Проверяю <b>{channel}</b>...", parse_mode="HTML")
         is_new = await check_and_notify(user_id, channel, subs)
@@ -296,7 +308,7 @@ async def check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton(ch, callback_data=f"check_pick:{ch}")] for ch in subs.keys()]
         await update.message.reply_text("Выбери канал для проверки:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    return None
+    return
 
 
 async def reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -304,12 +316,14 @@ async def reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     subs = await db_get_user_subs(user_id)
 
     if not subs:
-        return await update.message.reply_text("У тебя нет подписок.")
+        await update.message.reply_text("У тебя нет подписок.")
+        return
 
     if context.args:
         channel = context.args[0].strip().lower()
         if channel not in subs:
-            return await update.message.reply_text(f"Ты не подписан на {channel}.")
+            await update.message.reply_text(f"Ты не подписан на {channel}.")
+            return
 
         subs[channel]["last_sent"] = None
         await db_save_user_subs(user_id, subs)
@@ -318,7 +332,7 @@ async def reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton(ch, callback_data=f"reset_pick:{ch}")] for ch in subs.keys()]
         await update.message.reply_text("Выбери канал для сброса:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    return None
+    return
 
 
 async def setinterval_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -326,7 +340,8 @@ async def setinterval_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     subs = await db_get_user_subs(user_id)
 
     if not subs:
-        return await update.message.reply_text("У тебя нет подписок.")
+        await update.message.reply_text("У тебя нет подписок.")
+        return
 
     # Логика /setinterval name hours
     if len(context.args) == 2:
@@ -336,7 +351,8 @@ async def setinterval_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if channel in subs:
                 subs[channel]["interval"] = hours
                 await db_save_user_subs(user_id, subs)
-                return await update.message.reply_text(f"⏱ Интервал для {channel}: {hours} ч.")
+                await update.message.reply_text(f"⏱ Интервал для {channel}: {hours} ч.")
+                return
         except ValueError:
             pass
 
@@ -345,7 +361,7 @@ async def setinterval_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏱ Выбери канал для настройки интервала:",
                                     reply_markup=InlineKeyboardMarkup(keyboard))
 
-    return None
+    return
 
 
 # ---------------- UPDATED BUTTON HANDLER ----------------
@@ -356,10 +372,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     await query.answer()
 
+    # Парсим данные: действие и канал
+    if ":" not in data:
+        return
+
     action, channel = data.split(":", 1)
     subs = await db_get_user_subs(user_id)
 
-    if action == "check_pick":
+    if action == "unsub_pick":
+        if channel in subs:
+            del subs[channel]
+            await db_save_user_subs(user_id, subs)
+            await query.edit_message_text(f"✅ Ты отписался от <b>{channel}</b>", parse_mode="HTML")
+
+    elif action == "check_pick":
         await query.edit_message_text(f"⏳ Проверяю <b>{channel}</b>...", parse_mode="HTML")
         is_new = await check_and_notify(user_id, channel, subs)
         await db_save_user_subs(user_id, subs)
@@ -373,14 +399,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"♻️ Память для <b>{channel}</b> сброшена.", parse_mode="HTML")
 
     elif action == "setint_pick":
+        # Устанавливаем состояние ожидания ввода числа
         context.user_data["awaiting_interval_for"] = channel
         await query.edit_message_text(f"Введите новый интервал (в часах) для <b>{channel}</b>:", parse_mode="HTML")
-
-    elif action == "unsub":  # Если у вас была кнопка отписки
-        if channel in subs:
-            del subs[channel]
-            await db_save_user_subs(user_id, subs)
-            await query.edit_message_text(f"✅ Удалена подписка на {channel}")
 
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -429,7 +450,8 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def subscribe_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        return await update.message.reply_text("Используй: /subscribe [канал]")
+        await update.message.reply_text("Используй: /subscribe [канал]")
+        return
 
     channel = context.args[0].strip().lower()
     user_id = str(update.effective_user.id)
@@ -438,11 +460,13 @@ async def subscribe_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     post = await get_last_post_info(channel)
 
     if not post:
-        return await update.message.reply_text("❌ Канал не найден или нет постов.")
+        await update.message.reply_text("❌ Канал не найден или нет постов.")
+        return
 
     subs = await db_get_user_subs(user_id)
     if channel in subs:
-        return await update.message.reply_text("✅ Ты уже подписан.")
+        await update.message.reply_text("✅ Ты уже подписан.")
+        return
 
     subs[channel] = {
         "interval": 6,
@@ -456,29 +480,19 @@ async def subscribe_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     subs = await db_get_user_subs(user_id)
-    if not subs: return await update.message.reply_text("У тебя нет подписок.")
+    if not subs:
+        await update.message.reply_text("У тебя нет подписок.")
+        return
 
     text = "📋 <b>Твои подписки:</b>\n\n"
     keyboard = []
     for ch, cfg in subs.items():
         text += f"• {ch} (каждые {cfg['interval']}ч)\n"
-        keyboard.append([InlineKeyboardButton(f"❌ Отписаться от {ch}", callback_data=f"unsub:{ch}")])
+        keyboard.append([InlineKeyboardButton(f"❌ Отписаться от {ch}", callback_data=f"unsub_pick:{ch}")])
 
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
-
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = str(query.from_user.id)
-    action, channel = query.data.split(":", 1)
-    await query.answer()
-
-    if action == "unsub":
-        subs = await db_get_user_subs(user_id)
-        if channel in subs:
-            del subs[channel]
-            await db_save_user_subs(user_id, subs)
-            await query.edit_message_text(f"✅ Ты отписался от {channel}")
+    return
 
 
 # ---------------- WEBHOOK & LIFESPAN ----------------
@@ -502,7 +516,7 @@ async def lifespan(app: FastAPI):
     telegram_app.add_handler(CommandHandler("resetall", resetall_cmd))
     telegram_app.add_handler(CommandHandler("setinterval", setinterval_cmd))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    telegram_app.add_handler(CallbackQueryHandler(button_handler, pattern="^unsub:"))
+    telegram_app.add_handler(CallbackQueryHandler(button_handler))
 
     await telegram_app.initialize()
     await setup_commands(telegram_app)

@@ -547,6 +547,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root():
+    """Эндпоинт для проверки работоспособности сервера (Health Check)"""
+    return {"status": "ok"}
 
 @app.post("/webhook/{token}")
 async def webhook(token: str, request: Request):

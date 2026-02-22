@@ -205,7 +205,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "❓ <b>Справка по командам:</b>\n\n"
         "/subscribe <code>name</code> — подписаться на канал\n"
-        "/unsubscribe — выбрать канал для удаления\n"
+        "/unsubscribe <code>name</code> — удалить из уведомлений\n"
         "/list — список каналов\n"
         "/setinterval <code>name</code> <code>time</code> — изменить частоту проверок канала\n"
         "/check <code>name</code> — проверить канал сейчас\n"
@@ -270,7 +270,7 @@ async def check_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     results = []
     for channel in subs.keys():
         is_new = await check_and_notify(user_id, channel, subs)
-        status = "✅ Есть новый!" if is_new else "😴 Изменений нет"
+        status = "✅ Есть новый пост!" if is_new else "😴 Изменений нет"
         results.append(f"• {channel}: {status}")
         if is_new: changed = True
 
@@ -280,6 +280,14 @@ async def check_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.edit_text("<b>Результаты проверки:</b>\n\n" + "\n".join(results), parse_mode="HTML")
 
     return
+
+
+async def check_func(update_text, user_id, subs, channel=""):
+    await update_text(f"⏳ Проверяю <b>{channel}</b>...", parse_mode="HTML")
+    is_new = await check_and_notify(user_id, channel, subs)
+    await db_save_user_subs(user_id, subs)
+    if not is_new:
+        await update_text(f"😴 На канале <b>{channel}</b> новых постов нет.", parse_mode="HTML")
 
 
 async def check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -297,17 +305,19 @@ async def check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"Ты не подписан на {channel}.")
             return
 
-        await update.message.reply_text(f"⏳ Проверяю <b>{channel}</b>...", parse_mode="HTML")
-        is_new = await check_and_notify(user_id, channel, subs)
-        await db_save_user_subs(user_id, subs)
-        if not is_new:
-            await update.message.reply_text(f"😴 На канале <b>{channel}</b> новых постов нет.")
+        await check_func(update.message.reply_text, user_id, subs, channel)
     else:
         # Если аргумента нет — показываем кнопки
         keyboard = [[InlineKeyboardButton(ch, callback_data=f"check_pick:{ch}")] for ch in subs.keys()]
         await update.message.reply_text("Выбери канал для проверки:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     return
+
+
+async def reset_func(update_text, user_id, subs, channel=""):
+    subs[channel]["last_sent"] = None
+    await db_save_user_subs(user_id, subs)
+    await update_text(f"♻️ Память для <b>{channel}</b> сброшена.", parse_mode="HTML")
 
 
 async def reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -324,9 +334,8 @@ async def reset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"Ты не подписан на {channel}.")
             return
 
-        subs[channel]["last_sent"] = None
-        await db_save_user_subs(user_id, subs)
-        await update.message.reply_text(f"♻️ Память для <b>{channel}</b> сброшена.", parse_mode="HTML")
+        await reset_func(update.message.reply_text, user_id, subs, channel)
+
     else:
         keyboard = [[InlineKeyboardButton(ch, callback_data=f"reset_pick:{ch}")] for ch in subs.keys()]
         await update.message.reply_text("Выбери канал для сброса:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -387,17 +396,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("Ошибка: подписка уже была удалена ранее.")
 
     elif action == "check_pick":
-        await query.edit_message_text(f"⏳ Проверяю <b>{channel}</b>...", parse_mode="HTML")
-        is_new = await check_and_notify(user_id, channel, subs)
-        await db_save_user_subs(user_id, subs)
-        if not is_new:
-            await query.edit_message_text(f"😴 На канале <b>{channel}</b> новых постов нет.", parse_mode="HTML")
+        await check_func(query.edit_message_text, user_id, subs, channel)
 
     elif action == "reset_pick":
         if channel in subs:
-            subs[channel]["last_sent"] = None
-            await db_save_user_subs(user_id, subs)
-            await query.edit_message_text(f"♻️ Память для <b>{channel}</b> сброшена.", parse_mode="HTML")
+            await reset_func(query.edit_message_text, user_id, subs, channel)
 
     elif action == "setint_pick":
         # Устанавливаем состояние ожидания ввода числа
@@ -518,7 +521,7 @@ async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
     for ch, cfg in subs.items():
         t = cfg['interval']
-        text += (f"• <b>{ch}</b>\n{plural(t, 'каждый', 'каждые', 'каждые')} "
+        text += (f"• <b>{ch}</b> ({plural(t, 'каждый', 'каждые', 'каждые')} "
                  f"{'' if t == 1 else (str(t) + ' ')}"
                  f"{plural(t, 'час', 'часа', 'часов')})\n"
                  )
